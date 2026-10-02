@@ -33,3 +33,9 @@ Any of these brings it back:
 ## ⚠️ Caveats
 
 Tampa relies on private macOS APIs (`SLSConfigureDisplayEnabled` and `CGVirtualDisplay`), so a macOS update may break it. It cannot be distributed through the Mac App Store.
+
+## 🙏 Acknowledgements
+
+- [pasky/hidpi-mirror](https://github.com/pasky/hidpi-mirror) (MIT): the virtual display mirroring technique, the private `CGVirtualDisplay` declarations and the IOKit external-link check that HiDPI mode is based on.
+- [mesat/clamOpen](https://github.com/mesat/clamOpen) and [yutsuki3/AutoBlackout](https://github.com/yutsuki3/AutoBlackout): disabling the built-in display with the lid open and recovering it safely.
+- [waydabber/BetterDummy](https://github.com/waydabber/BetterDummy), which pioneered virtual displays for HiDPI on Apple Silicon.
