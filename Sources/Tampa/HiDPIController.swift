@@ -107,7 +107,7 @@ final class HiDPIController {
         pointWidth = width
         pointHeight = height
         isConfiguring = true
-        copyColorProfile(from: physical, to: CGDirectDisplayID(display.displayID))
+        syncColorProfile()
 
         let current = generation
         Task { [weak self] in
@@ -227,15 +227,30 @@ final class HiDPIController {
         CGCompleteDisplayConfiguration(config, .forSession)
     }
 
-    private func copyColorProfile(from source: CGDirectDisplayID, to target: CGDirectDisplayID) {
+    private func syncColorProfile() {
+        let current = generation
+        Task { [weak self] in
+            for _ in 0..<20 {
+                guard let self, self.generation == current, let virtualID = self.virtualID else { return }
+                if self.copyColorProfile(from: self.physicalID, to: virtualID) { return }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+
+    private func copyColorProfile(from source: CGDirectDisplayID, to target: CGDirectDisplayID) -> Bool {
         guard let sourceUUID = CGDisplayCreateUUIDFromDisplayID(source)?.takeRetainedValue(),
               let targetUUID = CGDisplayCreateUUIDFromDisplayID(target)?.takeRetainedValue(),
-              let url = currentProfileURL(of: sourceUUID) else { return }
+              let url = currentProfileURL(of: sourceUUID) else { return false }
+        if currentProfileURL(of: targetUUID) == url {
+            return true
+        }
         let profiles = [
             kColorSyncDeviceDefaultProfileID.takeUnretainedValue() as String: url,
             kColorSyncProfileUserScope.takeUnretainedValue() as String: kCFPreferencesCurrentUser as String
         ] as CFDictionary
         ColorSyncDeviceSetCustomProfiles(kColorSyncDisplayDeviceClass.takeUnretainedValue(), targetUUID, profiles)
+        return currentProfileURL(of: targetUUID) == url
     }
 
     private func currentProfileURL(of uuid: CFUUID) -> URL? {
