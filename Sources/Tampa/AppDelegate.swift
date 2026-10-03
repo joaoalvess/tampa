@@ -5,6 +5,7 @@ import ServiceManagement
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = DisplayController()
+    private let audio = AudioController()
     private let defaults = UserDefaults.standard
     private var statusItem: NSStatusItem?
     private var hotKey: HotKey?
@@ -25,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.showAlert("Não consegui ativar o texto nítido", "O modo HiDPI foi desligado e o monitor voltou ao normal.")
         }
         controller.start()
+        audio.start()
 
         hotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey | cmdKey) { [weak self] in
             self?.toggle()
@@ -65,6 +67,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hiDPIItem.state = controller.hiDPI.isEnabled ? .on : .off
         menu.addItem(hiDPIItem)
 
+        let audioItem = NSMenuItem(title: "Não usar o monitor como saída de som", action: #selector(toggleAvoidDisplayAudio), keyEquivalent: "")
+        audioItem.target = self
+        audioItem.state = audio.avoidsDisplayOutput ? .on : .off
+        menu.addItem(audioItem)
+
         let loginItem = NSMenuItem(title: "Abrir no login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -91,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleHiDPI() {
         controller.setHiDPI(!controller.hiDPI.isEnabled)
+    }
+
+    @objc private func toggleAvoidDisplayAudio() {
+        audio.avoidsDisplayOutput.toggle()
     }
 
     @objc private func toggleOpenAtLogin() {
