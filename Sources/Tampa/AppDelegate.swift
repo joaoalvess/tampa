@@ -67,6 +67,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hiDPIItem.state = controller.hiDPI.isEnabled ? .on : .off
         menu.addItem(hiDPIItem)
 
+        let sizeMenu = NSMenu()
+        for size in HiDPIController.Size.allCases {
+            let point = controller.hiDPI.pointSize(for: size)
+            let title = point.width > 0 ? "\(size.title) (\(point.width) × \(point.height))" : size.title
+            let item = NSMenuItem(title: title, action: #selector(selectHiDPISize(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = size.rawValue
+            item.state = controller.hiDPI.size == size ? .on : .off
+            item.isEnabled = controller.hiDPI.isEnabled
+            sizeMenu.addItem(item)
+        }
+        let sizeItem = NSMenuItem(title: "Tamanho", action: nil, keyEquivalent: "")
+        sizeItem.submenu = sizeMenu
+        sizeItem.indentationLevel = 1
+        menu.addItem(sizeItem)
+
         let audioItem = NSMenuItem(title: "Não usar o monitor como saída de som", action: #selector(toggleAvoidDisplayAudio), keyEquivalent: "")
         audioItem.target = self
         audioItem.state = audio.avoidsDisplayOutput ? .on : .off
@@ -98,6 +114,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleHiDPI() {
         controller.setHiDPI(!controller.hiDPI.isEnabled)
+    }
+
+    @objc private func selectHiDPISize(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String, let size = HiDPIController.Size(rawValue: rawValue) else { return }
+        controller.setHiDPISize(size)
     }
 
     @objc private func toggleAvoidDisplayAudio() {

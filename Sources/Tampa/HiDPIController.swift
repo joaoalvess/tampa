@@ -8,7 +8,34 @@ import VirtualDisplayPrivate
 final class HiDPIController {
     static let vendorID: UInt32 = 0x7A4D
 
+    enum Size: String, CaseIterable {
+        case standard
+        case larger
+        case largest
+        case moreSpace
+
+        var scale: Double {
+            switch self {
+            case .standard: return 1
+            case .larger: return 0.9
+            case .largest: return 0.8
+            case .moreSpace: return 1.125
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .standard: return "Padrão"
+            case .larger: return "Maior"
+            case .largest: return "Bem maior"
+            case .moreSpace: return "Mais espaço"
+            }
+        }
+    }
+
     var onFailure: (() -> Void)?
+    private(set) var nativeWidth = 0
+    private(set) var nativeHeight = 0
 
     private let defaults = UserDefaults.standard
     private var virtualDisplay: CGVirtualDisplay?
@@ -22,6 +49,15 @@ final class HiDPIController {
     var isEnabled: Bool {
         get { defaults.bool(forKey: "hiDPI") }
         set { defaults.set(newValue, forKey: "hiDPI") }
+    }
+
+    var size: Size {
+        get { defaults.string(forKey: "hiDPISize").flatMap(Size.init) ?? .standard }
+        set { defaults.set(newValue.rawValue, forKey: "hiDPISize") }
+    }
+
+    func pointSize(for size: Size) -> (width: Int, height: Int) {
+        (Int((Double(nativeWidth) * size.scale).rounded()), Int((Double(nativeHeight) * size.scale).rounded()))
     }
 
     private var virtualID: CGDirectDisplayID? {
@@ -55,8 +91,9 @@ final class HiDPIController {
 
     private func create(for physical: CGDirectDisplayID) {
         guard let native = nativeMode(of: physical) else { return }
-        let width = native.pixelWidth
-        let height = native.pixelHeight
+        nativeWidth = native.pixelWidth
+        nativeHeight = native.pixelHeight
+        let (width, height) = pointSize(for: size)
         let refreshRate = native.refreshRate > 0 ? native.refreshRate : 60
         physicalOrigin = CGDisplayBounds(physical).origin
 
@@ -92,7 +129,8 @@ final class HiDPIController {
         descriptor.name = "Tampa HiDPI"
         descriptor.queue = DispatchQueue.main
         let physicalSize = CGDisplayScreenSize(physical)
-        descriptor.sizeInMillimeters = physicalSize.width > 0 ? physicalSize : CGSize(width: 673, height: 284)
+        let baseSize = physicalSize.width > 0 ? physicalSize : CGSize(width: 673, height: 284)
+        descriptor.sizeInMillimeters = CGSize(width: baseSize.width * size.scale, height: baseSize.height * size.scale)
         descriptor.maxPixelsWide = UInt32(width * 2)
         descriptor.maxPixelsHigh = UInt32(height * 2)
         descriptor.redPrimary = CGPoint(x: 0.680, y: 0.320)
@@ -100,7 +138,7 @@ final class HiDPIController {
         descriptor.bluePrimary = CGPoint(x: 0.150, y: 0.060)
         descriptor.whitePoint = CGPoint(x: 0.3127, y: 0.3290)
         descriptor.vendorID = Self.vendorID
-        descriptor.productID = UInt32(width / 16 + height + Int(refreshRate))
+        descriptor.productID = UInt32(width / 16 + height + Int(refreshRate) + (defaults.integer(forKey: "hiDPISalt") + 1) * 4096)
         descriptor.serialNum = 1
         descriptor.terminationHandler = { [weak self] _, _ in
             MainActor.assumeIsolated {
@@ -150,19 +188,25 @@ final class HiDPIController {
         }
 
         Task { [weak self] in
-            for _ in 0..<12 {
+            for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, self.generation == current else { return }
-                if CGDisplayMirrorsDisplay(self.physicalID) == virtualID { break }
+                if self.isMirroredInHiDPI(virtualID) { break }
             }
             guard let self, self.generation == current else { return }
             self.isConfiguring = false
-            guard CGDisplayMirrorsDisplay(self.physicalID) == virtualID else {
+            guard self.isMirroredInHiDPI(virtualID) else {
                 self.fail()
                 return
             }
             self.restorePosition()
         }
+    }
+
+    private func isMirroredInHiDPI(_ virtualID: CGDirectDisplayID) -> Bool {
+        guard CGDisplayMirrorsDisplay(physicalID) == virtualID,
+              let mode = CGDisplayCopyDisplayMode(physicalID) ?? CGDisplayCopyDisplayMode(virtualID) else { return false }
+        return mode.width == pointWidth && mode.pixelWidth == pointWidth * 2
     }
 
     private func restorePosition() {
@@ -209,6 +253,7 @@ final class HiDPIController {
 
     private func fail() {
         tearDown()
+        defaults.set(defaults.integer(forKey: "hiDPISalt") + 1, forKey: "hiDPISalt")
         isEnabled = false
         onFailure?()
     }

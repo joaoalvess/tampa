@@ -70,6 +70,13 @@ final class DisplayController: NSObject {
         evaluate()
     }
 
+    func setHiDPISize(_ size: HiDPIController.Size) {
+        guard size != hiDPI.size else { return }
+        hiDPI.size = size
+        hiDPI.tearDown()
+        evaluate()
+    }
+
     func disableBuiltin() throws(DisableError) {
         guard PrivateDisplayAPI.isAvailable else { throw .apiUnavailable }
         guard let id = builtinID() else { throw .noBuiltin }
