@@ -6,44 +6,57 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = DisplayController()
     private let audio = AudioController()
+    private let keepAwake = KeepAwakeController()
     private lazy var settings = SettingsModel(display: controller, audio: audio)
     private let defaults = UserDefaults.standard
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
-    private var hotKey: HotKey?
+    private var hotKeys: [HotKey] = []
+    private let awakeDot = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 6))
+    private let awakeDotOffset = NSPoint(x: 7.5, y: 6.25)
     private var confirmAlert: NSAlert?
     private var confirmDeadline = Date()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
         statusItem = item
 
-        controller.onChange = { [weak self] in
-            self?.updateIcon()
-            self?.refreshVisibleSettings()
-        }
+        awakeDot.wantsLayer = true
+        awakeDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
+        awakeDot.layer?.cornerRadius = 3
+        awakeDot.isHidden = true
+        item.button?.addSubview(awakeDot)
+
+        controller.onChange = { [weak self] in self?.refreshVisibleSettings() }
         controller.onExternalConnected = { [weak self] in self?.turnOff(silently: true) }
         controller.onRestoreStuck = { [weak self] in self?.showRestoreStuck() }
         controller.hiDPI.onFailure = { [weak self] in
             self?.refreshVisibleSettings()
             self?.showAlert("Não consegui ativar o texto nítido", "O modo HiDPI foi desligado e o monitor voltou ao normal.")
         }
+        keepAwake.onChange = { [weak self] in self?.updateIcon() }
         controller.start()
         audio.start()
         settings.onLoginError = { [weak self] error in
             self?.showAlert("Não consegui alterar a abertura no login", error.localizedDescription)
         }
 
-        hotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey | cmdKey) { [weak self] in
-            self?.toggle()
-        }
+        hotKeys = [
+            HotKey(id: 1, keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey | cmdKey) { [weak self] in
+                self?.toggle()
+            },
+            HotKey(id: 2, keyCode: kVK_ANSI_C, modifiers: controlKey | optionKey | cmdKey) { [weak self] in
+                self?.keepAwake.toggle()
+            }
+        ]
         updateIcon()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        keepAwake.deactivate()
         controller.restoreBeforeQuit()
     }
 
@@ -66,6 +79,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let awakeItem = NSMenuItem(title: "Manter o Mac acordado ☕", action: #selector(toggleKeepAwake), keyEquivalent: "c")
+        awakeItem.keyEquivalentModifierMask = [.control, .option, .command]
+        awakeItem.target = self
+        awakeItem.state = keepAwake.isActive ? .on : .off
+        menu.addItem(awakeItem)
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(title: "Ajustes…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -81,6 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             turnOff(silently: false)
         }
+    }
+
+    @objc private func toggleKeepAwake() {
+        keepAwake.toggle()
     }
 
     @objc private func openSettings() {
@@ -183,9 +208,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIcon() {
-        let symbol = controller.isBuiltinOff ? "laptopcomputer.slash" : "laptopcomputer"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Tampa")
+        guard let button = statusItem?.button, let image = statusSymbol() else { return }
+        button.image = keepAwake.isActive ? cuttingAwakeDot(from: image) : image
+        let dotCenterY = button.isFlipped ? button.bounds.midY - awakeDotOffset.y : button.bounds.midY + awakeDotOffset.y
+        awakeDot.frame.origin = NSPoint(x: button.bounds.midX + awakeDotOffset.x - 3, y: dotCenterY - 3)
+        awakeDot.isHidden = !keepAwake.isActive
+    }
+
+    private func statusSymbol() -> NSImage? {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        let image = NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: "Tampa")?.withSymbolConfiguration(configuration)
         image?.isTemplate = true
-        statusItem?.button?.image = image
+        return image
+    }
+
+    private func cuttingAwakeDot(from symbol: NSImage) -> NSImage {
+        let offset = awakeDotOffset
+        let image = NSImage(size: symbol.size, flipped: false) { rect in
+            symbol.draw(in: rect)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: NSRect(x: rect.midX + offset.x - 4.5, y: rect.midY + offset.y - 4.5, width: 9, height: 9)).fill()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Tampa"
+        return image
     }
 }
