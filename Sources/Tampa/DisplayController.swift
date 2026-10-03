@@ -121,8 +121,29 @@ final class DisplayController: NSObject {
                 onExternalConnected?()
             }
             hiDPI.update(physical: externals.first)
+            for display in externals where CGDisplayMirrorsDisplay(display) == kCGNullDirectDisplay {
+                useHighestRefreshRate(on: display)
+            }
         }
         onChange?()
+    }
+
+    private func useHighestRefreshRate(on display: CGDirectDisplayID) {
+        guard let current = CGDisplayCopyDisplayMode(display) else { return }
+        let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+        let modes = (CGDisplayCopyAllDisplayModes(display, options) as? [CGDisplayMode]) ?? []
+        guard let best = modes
+            .filter({
+                $0.width == current.width && $0.height == current.height
+                    && $0.pixelWidth == current.pixelWidth && $0.pixelHeight == current.pixelHeight
+            })
+            .max(by: { $0.refreshRate < $1.refreshRate }),
+            best.refreshRate > current.refreshRate + 0.5 else { return }
+
+        var config: CGDisplayConfigRef?
+        guard CGBeginDisplayConfiguration(&config) == .success else { return }
+        CGConfigureDisplayWithDisplayMode(config, display, best, nil)
+        CGCompleteDisplayConfiguration(config, .permanently)
     }
 
     private func attemptRestore() {
