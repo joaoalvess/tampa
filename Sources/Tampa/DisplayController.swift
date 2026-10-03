@@ -31,6 +31,14 @@ final class DisplayController: NSObject {
         set { defaults.set(newValue, forKey: "autoDisable") }
     }
 
+    var usesHighestRefreshRate: Bool {
+        get { defaults.bool(forKey: "highestRefreshRate") }
+        set {
+            defaults.set(newValue, forKey: "highestRefreshRate")
+            evaluate()
+        }
+    }
+
     private(set) var isBuiltinOff: Bool {
         get { defaults.bool(forKey: "builtinOff") }
         set {
@@ -44,6 +52,7 @@ final class DisplayController: NSObject {
     }
 
     func start() {
+        defaults.register(defaults: ["highestRefreshRate": true])
         if isBuiltinOff, isBuiltinActive() {
             isBuiltinOff = false
         }
@@ -128,7 +137,7 @@ final class DisplayController: NSObject {
                 onExternalConnected?()
             }
             hiDPI.update(physical: externals.first)
-            for display in externals where CGDisplayMirrorsDisplay(display) == kCGNullDirectDisplay {
+            for display in externals where usesHighestRefreshRate && CGDisplayMirrorsDisplay(display) == kCGNullDirectDisplay {
                 useHighestRefreshRate(on: display)
             }
         }

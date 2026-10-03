@@ -1,13 +1,15 @@
 import AppKit
 import Carbon
-import ServiceManagement
+import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = DisplayController()
     private let audio = AudioController()
+    private lazy var settings = SettingsModel(display: controller, audio: audio)
     private let defaults = UserDefaults.standard
     private var statusItem: NSStatusItem?
+    private var settingsWindow: NSWindow?
     private var hotKey: HotKey?
     private var confirmAlert: NSAlert?
     private var confirmDeadline = Date()
@@ -19,14 +21,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.menu = menu
         statusItem = item
 
-        controller.onChange = { [weak self] in self?.updateIcon() }
+        controller.onChange = { [weak self] in
+            self?.updateIcon()
+            self?.refreshVisibleSettings()
+        }
         controller.onExternalConnected = { [weak self] in self?.turnOff(silently: true) }
         controller.onRestoreStuck = { [weak self] in self?.showRestoreStuck() }
         controller.hiDPI.onFailure = { [weak self] in
+            self?.refreshVisibleSettings()
             self?.showAlert("Não consegui ativar o texto nítido", "O modo HiDPI foi desligado e o monitor voltou ao normal.")
         }
         controller.start()
         audio.start()
+        settings.onLoginError = { [weak self] error in
+            self?.showAlert("Não consegui alterar a abertura no login", error.localizedDescription)
+        }
 
         hotKey = HotKey(keyCode: kVK_ANSI_T, modifiers: controlKey | optionKey | cmdKey) { [weak self] in
             self?.toggle()
@@ -57,43 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let autoItem = NSMenuItem(title: "Desligar ao conectar monitor", action: #selector(toggleAutoDisable), keyEquivalent: "")
-        autoItem.target = self
-        autoItem.state = controller.autoDisable ? .on : .off
-        menu.addItem(autoItem)
-
-        let hiDPIItem = NSMenuItem(title: "Texto nítido (HiDPI)", action: #selector(toggleHiDPI), keyEquivalent: "")
-        hiDPIItem.target = self
-        hiDPIItem.state = controller.hiDPI.isEnabled ? .on : .off
-        menu.addItem(hiDPIItem)
-
-        let sizeMenu = NSMenu()
-        for size in HiDPIController.Size.allCases {
-            let point = controller.hiDPI.pointSize(for: size)
-            let title = point.width > 0 ? "\(size.title) (\(point.width) × \(point.height))" : size.title
-            let item = NSMenuItem(title: title, action: #selector(selectHiDPISize(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = size.rawValue
-            item.state = controller.hiDPI.size == size ? .on : .off
-            item.isEnabled = controller.hiDPI.isEnabled
-            sizeMenu.addItem(item)
-        }
-        let sizeItem = NSMenuItem(title: "Tamanho", action: nil, keyEquivalent: "")
-        sizeItem.submenu = sizeMenu
-        sizeItem.indentationLevel = 1
-        menu.addItem(sizeItem)
-
-        let audioItem = NSMenuItem(title: "Não usar o monitor como saída de som", action: #selector(toggleAvoidDisplayAudio), keyEquivalent: "")
-        audioItem.target = self
-        audioItem.state = audio.avoidsDisplayOutput ? .on : .off
-        menu.addItem(audioItem)
-
-        let loginItem = NSMenuItem(title: "Abrir no login", action: #selector(toggleOpenAtLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(loginItem)
-
-        menu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Ajustes…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         let quitItem = NSMenuItem(title: "Sair do Tampa", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -108,37 +83,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func toggleAutoDisable() {
-        controller.autoDisable.toggle()
-    }
-
-    @objc private func toggleHiDPI() {
-        controller.setHiDPI(!controller.hiDPI.isEnabled)
-    }
-
-    @objc private func selectHiDPISize(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String, let size = HiDPIController.Size(rawValue: rawValue) else { return }
-        controller.setHiDPISize(size)
-    }
-
-    @objc private func toggleAvoidDisplayAudio() {
-        audio.avoidsDisplayOutput.toggle()
-    }
-
-    @objc private func toggleOpenAtLogin() {
-        let service = SMAppService.mainApp
-        do {
-            if service.status == .enabled {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
-        } catch {
-            showAlert("Não consegui alterar a abertura no login", error.localizedDescription)
+    @objc private func openSettings() {
+        settings.refresh()
+        if settingsWindow == nil {
+            let hosting = NSHostingController(rootView: SettingsView(model: settings))
+            hosting.sizingOptions = .preferredContentSize
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "Ajustes do Tampa"
+            window.styleMask = [.titled, .closable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
         }
-        if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
-        }
+        NSApp.activate()
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func quit() {
@@ -217,6 +175,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .system(let error):
             return "O macOS recusou o pedido (CGError \(error.rawValue))."
         }
+    }
+
+    private func refreshVisibleSettings() {
+        guard settingsWindow?.isVisible == true else { return }
+        settings.refresh()
     }
 
     private func updateIcon() {
